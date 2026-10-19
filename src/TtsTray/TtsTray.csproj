@@ -7,6 +7,13 @@
     <PlatformTarget>x64</PlatformTarget>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Иконки окна и трея: app — покой, reading — идёт чтение. -->
+    <EmbeddedResource Include="Resources\app.ico" LogicalName="TtsTray.app.ico" />
+    <EmbeddedResource Include="Resources\reading.ico" LogicalName="TtsTray.reading.ico" />
+  </ItemGroup>
 
 </Project>

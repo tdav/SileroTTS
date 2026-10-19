@@ -118,6 +118,7 @@ partial class MainForm
         //
         pauseMenuItem.Enabled = false;
         pauseMenuItem.Name = "pauseMenuItem";
+        pauseMenuItem.ShortcutKeyDisplayString = "Ctrl+Alt+P";
         pauseMenuItem.Text = "Пауза";
         pauseMenuItem.Click += pauseButton_Click;
         //
@@ -125,6 +126,7 @@ partial class MainForm
         //
         stopMenuItem.Enabled = false;
         stopMenuItem.Name = "stopMenuItem";
+        stopMenuItem.ShortcutKeyDisplayString = "Ctrl+Alt+S";
         stopMenuItem.Text = "Стоп";
         stopMenuItem.Click += stopButton_Click;
         //

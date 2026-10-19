@@ -5,13 +5,22 @@ namespace TtsTray;
 /// <summary>
 /// Главное окно и иконка в трее. Создаётся скрытым (см. Program), показывается по запросу.
 /// Слушает изменения буфера обмена и читает длинный скопированный текст.
+/// Глобальные горячие клавиши: Ctrl+Alt+P — пауза/продолжить, Ctrl+Alt+S — стоп.
 /// </summary>
 public partial class MainForm : Form
 {
     private const int WmClipboardUpdate = 0x031D;
+    private const int WmHotKey = 0x0312;
+    private const int HotKeyPauseId = 1;
+    private const int HotKeyStopId = 2;
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+    private const uint ModNoRepeat = 0x4000;
 
     private readonly AppSettings settings;
     private readonly SapiSpeaker speaker;
+    private readonly Icon trayIdleIcon;
+    private readonly Icon trayReadingIcon;
     private bool exiting;
 
     /// <summary>Последний автоозвученный текст — чтобы не перезапускать чтение на повторных уведомлениях.</summary>
@@ -23,8 +32,25 @@ public partial class MainForm : Form
     public MainForm(AppSettings settings)
     {
         this.InitializeComponent();
-        this.Icon = SystemIcons.Application;
-        this.notifyIcon.Icon = SystemIcons.Application;
+
+        // Иконки встроены в сборку (Resources\*.ico); для трея — малый системный размер, иначе Windows масштабирует 32×32.
+        var assembly = typeof(MainForm).Assembly;
+        using (Stream stream = assembly.GetManifestResourceStream("TtsTray.app.ico")!)
+        {
+            this.Icon = new Icon(stream);
+        }
+
+        using (Stream stream = assembly.GetManifestResourceStream("TtsTray.app.ico")!)
+        {
+            this.trayIdleIcon = new Icon(stream, SystemInformation.SmallIconSize);
+        }
+
+        using (Stream stream = assembly.GetManifestResourceStream("TtsTray.reading.ico")!)
+        {
+            this.trayReadingIcon = new Icon(stream, SystemInformation.SmallIconSize);
+        }
+
+        this.notifyIcon.Icon = this.trayIdleIcon;
 
         this.settings = settings;
         this.speaker = new SapiSpeaker();
@@ -64,17 +90,44 @@ public partial class MainForm : Form
     {
         base.OnHandleCreated(e);
         AddClipboardFormatListener(this.Handle);
+
+        // Сочетание может быть уже занято другой программой — тогда работает только меню трея.
+        var failed = new List<string>();
+        if (!RegisterHotKey(this.Handle, HotKeyPauseId, ModControl | ModAlt | ModNoRepeat, (uint)Keys.P))
+        {
+            failed.Add("Ctrl+Alt+P");
+        }
+
+        if (!RegisterHotKey(this.Handle, HotKeyStopId, ModControl | ModAlt | ModNoRepeat, (uint)Keys.S))
+        {
+            failed.Add("Ctrl+Alt+S");
+        }
+
+        if (failed.Count > 0)
+        {
+            this.notifyIcon.ShowBalloonTip(5000, "TtsTray", $"Сочетание {string.Join(", ", failed)} занято другой программой.", ToolTipIcon.Warning);
+        }
     }
 
     protected override void OnHandleDestroyed(EventArgs e)
     {
         RemoveClipboardFormatListener(this.Handle);
+        UnregisterHotKey(this.Handle, HotKeyPauseId);
+        UnregisterHotKey(this.Handle, HotKeyStopId);
         base.OnHandleDestroyed(e);
     }
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == WmClipboardUpdate && this.settings.AutoReadClipboard)
+        if (m.Msg == WmHotKey && (int)m.WParam == HotKeyPauseId)
+        {
+            this.pauseButton_Click(this, EventArgs.Empty);
+        }
+        else if (m.Msg == WmHotKey && (int)m.WParam == HotKeyStopId)
+        {
+            this.speaker.Stop();
+        }
+        else if (m.Msg == WmClipboardUpdate && this.settings.AutoReadClipboard)
         {
             // GetText возвращает "", если текста нет; ContainsText не вызываем — он тоже бросает, когда буфер занят.
             string text = "";
@@ -94,6 +147,9 @@ public partial class MainForm : Form
             if (words > this.settings.WordThreshold && !(this.speaker.IsBusy && text == this.lastAutoText))
             {
                 this.lastAutoText = text;
+
+                // Показываем читаемый текст в поле ввода (окно при этом не открываем); прежнее содержимое заменяется.
+                this.textBox.Text = text.ReplaceLineEndings("\r\n");
                 try
                 {
                     this.speaker.Speak(text);
@@ -116,6 +172,14 @@ public partial class MainForm : Form
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint virtualKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterHotKey(IntPtr hwnd, int id);
+
     private void Speaker_StateChanged(object? sender, EventArgs e)
     {
         bool busy = this.speaker.IsBusy;
@@ -133,7 +197,7 @@ public partial class MainForm : Form
             : this.speaker.IsPaused ? "TtsTray — пауза"
             : busy ? "TtsTray — читаю"
             : "TtsTray";
-        this.notifyIcon.Icon = busy ? SystemIcons.Information : SystemIcons.Application;
+        this.notifyIcon.Icon = busy ? this.trayReadingIcon : this.trayIdleIcon;
     }
 
     private void speakButton_Click(object? sender, EventArgs e)
@@ -226,6 +290,8 @@ public partial class MainForm : Form
         this.speaker.Dispose();
         this.notifyIcon.Visible = false;
         this.notifyIcon.Dispose();
+        this.trayIdleIcon.Dispose();
+        this.trayReadingIcon.Dispose();
         Application.ExitThread();
     }
 }
