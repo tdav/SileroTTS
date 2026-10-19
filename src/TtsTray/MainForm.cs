@@ -1,13 +1,21 @@
+using System.Runtime.InteropServices;
+
 namespace TtsTray;
 
 /// <summary>
 /// Главное окно и иконка в трее. Создаётся скрытым (см. Program), показывается по запросу.
+/// Слушает изменения буфера обмена и читает длинный скопированный текст.
 /// </summary>
 public partial class MainForm : Form
 {
+    private const int WmClipboardUpdate = 0x031D;
+
     private readonly AppSettings settings;
     private readonly SapiSpeaker speaker;
     private bool exiting;
+
+    /// <summary>Последний автоозвученный текст — чтобы не перезапускать чтение на повторных уведомлениях.</summary>
+    private string? lastAutoText;
 
     public MainForm(AppSettings settings)
     {
@@ -48,6 +56,54 @@ public partial class MainForm : Form
 
         this.Activate();
     }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        AddClipboardFormatListener(this.Handle);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        RemoveClipboardFormatListener(this.Handle);
+        base.OnHandleDestroyed(e);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WmClipboardUpdate && this.settings.AutoReadClipboard && Clipboard.ContainsText())
+        {
+            string? text = null;
+            try
+            {
+                text = Clipboard.GetText();
+            }
+            catch (ExternalException)
+            {
+                // Буфер занят другой программой — пропускаем это изменение.
+            }
+
+            int words = text?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length ?? 0;
+
+            // Повторное уведомление на то же копирование (браузеры, Office шлют несколько) не перезапускает чтение.
+            // Окно не показываем и фокус не забираем.
+            if (text != null && words > this.settings.WordThreshold && !(this.speaker.IsBusy && text == this.lastAutoText))
+            {
+                this.lastAutoText = text;
+                this.speaker.Speak(text);
+            }
+        }
+
+        base.WndProc(ref m);
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AddClipboardFormatListener(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
     private void Speaker_StateChanged(object? sender, EventArgs e)
     {
