@@ -74,9 +74,10 @@ public partial class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == WmClipboardUpdate && this.settings.AutoReadClipboard && Clipboard.ContainsText())
+        if (m.Msg == WmClipboardUpdate && this.settings.AutoReadClipboard)
         {
-            string? text = null;
+            // GetText возвращает "", если текста нет; ContainsText не вызываем — он тоже бросает, когда буфер занят.
+            string text = "";
             try
             {
                 text = Clipboard.GetText();
@@ -86,14 +87,21 @@ public partial class MainForm : Form
                 // Буфер занят другой программой — пропускаем это изменение.
             }
 
-            int words = text?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length ?? 0;
+            int words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
 
             // Повторное уведомление на то же копирование (браузеры, Office шлют несколько) не перезапускает чтение.
-            // Окно не показываем и фокус не забираем.
-            if (text != null && words > this.settings.WordThreshold && !(this.speaker.IsBusy && text == this.lastAutoText))
+            // Окно не показываем и фокус не забираем — даже при ошибке SAPI, только уведомление у трея.
+            if (words > this.settings.WordThreshold && !(this.speaker.IsBusy && text == this.lastAutoText))
             {
                 this.lastAutoText = text;
-                this.speaker.Speak(text);
+                try
+                {
+                    this.speaker.Speak(text);
+                }
+                catch (COMException ex)
+                {
+                    this.notifyIcon.ShowBalloonTip(5000, "TtsTray", $"Не удалось озвучить: {ex.Message}", ToolTipIcon.Error);
+                }
             }
         }
 
@@ -130,6 +138,8 @@ public partial class MainForm : Form
 
     private void speakButton_Click(object? sender, EventArgs e)
     {
+        // Автоозвученный текст больше не читается — повторное копирование должно снова его прочитать.
+        this.lastAutoText = null;
         this.speaker.Speak(this.textBox.Text);
     }
 
@@ -158,7 +168,6 @@ public partial class MainForm : Form
             return;
         }
 
-        string? previousVoiceId = this.speaker.CurrentVoiceId;
         DialogResult result;
         using (this.settingsForm = new SettingsForm(this.speaker, this.settings))
         {
@@ -167,15 +176,16 @@ public partial class MainForm : Form
         }
 
         this.settingsForm = null;
-        if (result != DialogResult.OK)
+        if (result == DialogResult.OK)
         {
-            return;
+            this.speaker.SelectVoice(this.settings.VoiceId);
+            this.speaker.Rate = this.settings.Rate;
+            this.speaker.Volume = this.settings.Volume;
         }
 
-        this.speaker.SelectVoice(this.settings.VoiceId);
-        this.speaker.Rate = this.settings.Rate;
-        this.speaker.Volume = this.settings.Volume;
-        if (this.speaker.CurrentVoiceId != previousVoiceId && !this.speaker.IsBusy)
+        // «Прослушать» мог переключить движок и обратно (при «Отмене») — прогреваем голос в любом случае:
+        // для уже загруженного голоса это несколько миллисекунд.
+        if (!this.speaker.IsBusy)
         {
             this.speaker.WarmUp();
         }

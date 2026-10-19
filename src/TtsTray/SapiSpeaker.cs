@@ -18,6 +18,10 @@ public sealed class SapiSpeaker : IDisposable
     // Флаги SpeechVoiceSpeakFlags.
     private const int SvsfAsync = 1;
     private const int SvsfPurgeBeforeSpeak = 2;
+    private const int SvsfIsNotXml = 16;
+
+    /// <summary>Максимум символов между точками для движка Silero (падает на ~900+; 831 проверено как рабочее).</summary>
+    private const int MaxSentenceLength = 400;
 
     private readonly dynamic voice;
     private readonly Dictionary<string, object> tokens = new();
@@ -75,7 +79,18 @@ public sealed class SapiSpeaker : IDisposable
                 return;
             }
 
-            if (!(bool)this.voice.WaitUntilDone(0))
+            bool done;
+            try
+            {
+                done = (bool)this.voice.WaitUntilDone(0);
+            }
+            catch (COMException)
+            {
+                // Движок сломался посреди чтения — считаем чтение законченным, чтобы ошибка не повторялась каждый тик.
+                done = true;
+            }
+
+            if (!done)
             {
                 return;
             }
@@ -155,7 +170,62 @@ public sealed class SapiSpeaker : IDisposable
             this.IsWarmingUp = false;
         }
 
-        this.voice.Speak(text, SvsfAsync | SvsfPurgeBeforeSpeak);
+        // Движок Silero режет текст на предложения только по точке. Предложение длиннее ~900 символов
+        // даёт E_UNEXPECTED, ~3000 — access violation в silero_tts_sapi.dll (падает весь процесс) или зависание.
+        // Переносы строк, запятые и «;» он границей не считает (проверено 2026-10-19). Поэтому:
+        // строка без знака в конце получает точку, а участок длиннее MaxSentenceLength без «точка+пробел»
+        // режется точкой по последнему пробелу (или жёстко, если пробела нет).
+        var prepared = new System.Text.StringBuilder(text.Length + 64);
+        foreach (string line in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            prepared.Append(line);
+            if (".!?…".IndexOf(line[^1]) < 0)
+            {
+                prepared.Append('.');
+            }
+
+            prepared.Append(' ');
+        }
+
+        var safe = new System.Text.StringBuilder(prepared.Length + 64);
+        int sentenceStart = 0;
+        int lastSpace = -1;
+        foreach (char c in prepared.ToString())
+        {
+            safe.Append(c);
+            if (char.IsWhiteSpace(c))
+            {
+                if (safe.Length >= 2 && safe[^2] == '.')
+                {
+                    sentenceStart = safe.Length;
+                    lastSpace = -1;
+                }
+                else
+                {
+                    lastSpace = safe.Length - 1;
+                }
+            }
+
+            if (safe.Length - sentenceStart > MaxSentenceLength)
+            {
+                if (lastSpace > sentenceStart)
+                {
+                    safe.Insert(lastSpace, '.');
+                    sentenceStart = lastSpace + 2;
+                }
+                else
+                {
+                    safe.Append(". ");
+                    sentenceStart = safe.Length;
+                }
+
+                lastSpace = -1;
+            }
+        }
+
+        // SvsfIsNotXml: иначе SAPI сам решает, что текст, начинающийся с «<» (HTML, csproj), — это SAPI XML,
+        // и на битой разметке бросает COMException.
+        this.voice.Speak(safe.ToString(), SvsfAsync | SvsfPurgeBeforeSpeak | SvsfIsNotXml);
 
         // Ловушка SAPI: после очистки очереди голос остаётся на паузе, и новый текст молчит до Resume().
         if (this.IsPaused)
