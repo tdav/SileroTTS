@@ -84,7 +84,7 @@ partial class MainForm
         stopButton.Enabled = false;
         stopButton.Name = "stopButton";
         stopButton.TabIndex = 2;
-        stopButton.Text = "Стоп";
+        stopButton.Text = "Стоп Ctrl+Alt+S";
         stopButton.Click += stopButton_Click;
         //
         // settingsButton
