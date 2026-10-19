@@ -17,6 +17,9 @@ public partial class MainForm : Form
     /// <summary>Последний автоозвученный текст — чтобы не перезапускать чтение на повторных уведомлениях.</summary>
     private string? lastAutoText;
 
+    /// <summary>Открытый диалог настроек — второй не создаётся.</summary>
+    private SettingsForm? settingsForm;
+
     public MainForm(AppSettings settings)
     {
         this.InitializeComponent();
@@ -145,6 +148,37 @@ public partial class MainForm : Form
     private void stopButton_Click(object? sender, EventArgs e)
     {
         this.speaker.Stop();
+    }
+
+    private void settingsButton_Click(object? sender, EventArgs e)
+    {
+        if (this.settingsForm != null)
+        {
+            this.settingsForm.Activate();
+            return;
+        }
+
+        string? previousVoiceId = this.speaker.CurrentVoiceId;
+        DialogResult result;
+        using (this.settingsForm = new SettingsForm(this.speaker, this.settings))
+        {
+            // Скрытое окно не может быть владельцем модального диалога.
+            result = this.Visible ? this.settingsForm.ShowDialog(this) : this.settingsForm.ShowDialog();
+        }
+
+        this.settingsForm = null;
+        if (result != DialogResult.OK)
+        {
+            return;
+        }
+
+        this.speaker.SelectVoice(this.settings.VoiceId);
+        this.speaker.Rate = this.settings.Rate;
+        this.speaker.Volume = this.settings.Volume;
+        if (this.speaker.CurrentVoiceId != previousVoiceId && !this.speaker.IsBusy)
+        {
+            this.speaker.WarmUp();
+        }
     }
 
     private void textBox_KeyDown(object? sender, KeyEventArgs e)

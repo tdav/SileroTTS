@@ -90,10 +90,10 @@ partial class MainForm
         // settingsButton
         //
         settingsButton.AutoSize = true;
-        settingsButton.Enabled = false;
         settingsButton.Name = "settingsButton";
         settingsButton.TabIndex = 3;
         settingsButton.Text = "Настройки…";
+        settingsButton.Click += settingsButton_Click;
         //
         // notifyIcon
         //
@@ -130,9 +130,9 @@ partial class MainForm
         //
         // settingsMenuItem
         //
-        settingsMenuItem.Enabled = false;
         settingsMenuItem.Name = "settingsMenuItem";
         settingsMenuItem.Text = "Настройки…";
+        settingsMenuItem.Click += settingsButton_Click;
         //
         // exitMenuItem
         //

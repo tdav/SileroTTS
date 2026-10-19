@@ -29,6 +29,7 @@ public sealed class SapiSpeaker : IDisposable
         this.voice = Activator.CreateInstance(Type.GetTypeFromProgID("SAPI.SpVoice", throwOnError: true)!)!;
 
         var voices = new List<VoiceItem>();
+        string? anyRussianSileroId = null;
         foreach (dynamic token in this.voice.GetVoices())
         {
             string id = token.Id;
@@ -47,10 +48,15 @@ public sealed class SapiSpeaker : IDisposable
                 language = "";
             }
 
-            // Голос по умолчанию — первый русский (LCID 0x419) голос Silero.
-            if (this.defaultVoiceId == null && group == "Silero" && language.Split(';').Contains("419", StringComparer.OrdinalIgnoreCase))
+            // Голос по умолчанию — первый русский голос Silero. LCID 0x419 есть и у чувашского, удмуртского
+            // и других голосов Silero, поэтому сначала ищем «(Russian)» в имени, а 0x419 — запасной вариант.
+            if (group == "Silero" && language.Split(';').Contains("419", StringComparer.OrdinalIgnoreCase))
             {
-                this.defaultVoiceId = id;
+                anyRussianSileroId ??= id;
+                if (this.defaultVoiceId == null && name.EndsWith("(Russian)", StringComparison.Ordinal))
+                {
+                    this.defaultVoiceId = id;
+                }
             }
 
             this.tokens[id] = token;
@@ -59,7 +65,7 @@ public sealed class SapiSpeaker : IDisposable
 
         var groupOrder = new[] { "Silero", "Microsoft", "Другие" };
         this.Voices = voices.OrderBy(v => Array.IndexOf(groupOrder, v.Group)).ToList();
-        this.defaultVoiceId ??= this.Voices.FirstOrDefault()?.Id;
+        this.defaultVoiceId ??= anyRussianSileroId ?? this.Voices.FirstOrDefault()?.Id;
 
         this.timer = new System.Windows.Forms.Timer { Interval = 200 };
         this.timer.Tick += (_, _) =>
